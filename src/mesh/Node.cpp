@@ -82,6 +82,7 @@ u32 MultipleCount[16];
 u32 CollsndCount[16];
 u32 avgDelay[16];
 int rcvCount[16];
+u32 meshHopCount[50];
 
 int ssettime=-1; // ssettime 開關
 int adjust=-1; //調整誤差 開關
@@ -1382,11 +1383,13 @@ void Node::MeshMessageReceivedHandler(BaseConnection* connection, BaseConnection
                     packetHeader->sender,
                     (u32)ModuleId::NODE,
                     packet->requestHandle);
-                if (packet->requestHandle > GS->meshHopCount){
-                    trace("hopsToSink: from %u to %u" EOL, GS->meshHopCount, packet->requestHandle);
-                    GS->meshHopCount = packet->requestHandle;
+                if (packet->requestHandle > GS->maxMeshHopCount){
+                    trace("MAX hopsToSink: from %u to %u" EOL, GS->maxMeshHopCount, packet->requestHandle);
+                    GS->maxMeshHopCount = packet->requestHandle;
                 }
 
+                meshHopCount[packetHeader->sender - 1] = packet->requestHandle;
+ 
                 if (packetHeader->sender < TOTAL_NODE_NUM){
                     u32 nextNodeId = packetHeader->sender + 1;
                     SendModuleActionMessage(
@@ -1398,6 +1401,18 @@ void Node::MeshMessageReceivedHandler(BaseConnection* connection, BaseConnection
                         0,
                         false
                     );
+                }else if (packetHeader->sender == TOTAL_NODE_NUM){
+                    GS->avgMeshHopCount = 0.0;
+                    u32 temp = 0;
+                    for (u32 i = 0; i < TOTAL_NODE_NUM; i++){
+                        temp += meshHopCount[i];
+                        trace("Node %u hopsToSink: %u" EOL, i + 1, meshHopCount[i]);
+                    }
+                    GS->avgMeshHopCount = (float)temp / (float)TOTAL_NODE_NUM;
+
+                    printf("avg hopsToSink: %.2f" EOL, GS->avgMeshHopCount);
+                    trace("MAX hopsToSink: %u" EOL, GS->maxMeshHopCount);
+                    trace("TOTAL_NODE_NUM: %u" EOL, TOTAL_NODE_NUM);
                 }
             }
             
@@ -3867,13 +3882,18 @@ TerminalCommandHandlerReturnType Node::TerminalCommandHandler(const char* comman
             }
 
             //new command: know all node hop count
-            if (commandArgsSize > 3 && TERMARGS(3, "hopcount"))
+            if (commandArgsSize > 4 && TERMARGS(3, "hopcount"))
             {
-                //  0     1    2      3         
-                //action this node hopcount
+                //  0     1    2      3          4
+                //action this node hopcount TOTAL_NODE_NUM
                 
-                GS->meshHopCount = 0;
-                TOTAL_NODE_NUM = 50;
+                GS->maxMeshHopCount = 0;
+                GS->avgMeshHopCount = 0;
+                TOTAL_NODE_NUM = Utility::StringToU8(commandArgs[4]);
+
+                for (int i = 0; i < TOTAL_NODE_NUM ; i++){
+                    meshHopCount[i] = 0;
+                } 
 
                 SendModuleActionMessage(
                     MessageType::MODULE_TRIGGER_ACTION,
